@@ -1,0 +1,26 @@
+#!/usr/bin/make -f
+
+# Add here any variable or target overrides you need.
+%:
+	dh $@ --with systemd
+
+override_dh_auto_clean:
+	dh_clean
+	rm -rf build/
+
+override_dh_auto_install:
+	mkdir build
+	if [ -f './vault' ] ; then \
+		cp vault build/; \
+	else \
+		echo "ERROR: 'vault' binary is missing! Try running ./get_release?"; \
+		exit 1; \
+	fi
+	if [ -d './docs' ] ; then \
+		cp -r docs build/; \
+	else \
+		echo "ERROR: 'docs' are missing! Try running ./get_release again?"; \
+		exit 1; \
+	fi
+
+.PHONY: build

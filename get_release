@@ -1,0 +1,303 @@
+#!/usr/bin/python3
+"""
+Query github's api for releases, generate a debian style change log per
+release, outputted to stdout. Then download and extract the latest
+linux_amd64 binary
+"""
+
+import datetime
+import json
+import logging
+import os
+import re
+import ssl
+import sys
+from io import BytesIO
+from urllib import request
+from zipfile import ZipFile
+
+def http_request(
+        url: str,
+        headers: dict = None,
+        payload: dict = None,
+        insecure: bool = False,
+        logger=None) -> tuple:
+    """
+    Make an HTTP request
+
+    Args:
+        url:
+            Url to send the request to
+        headers: dict
+            Optional dictionary of headers to pass
+        payload: dict
+            Optional payload of dict values to send
+        insecure: bool
+            Optional flag to indicate whether certificate validation to the
+            http server should happen.
+        logger:
+            Optional logger object
+    Returns Tuple
+        Element 1: Bool: Indicating success
+        Element 2: Str: Response from the request to the HTTP server
+    """
+    ctx = None
+    cafile = None
+    data = None
+    if not headers:
+        headers = dict()
+    if logger:
+        log = logger
+    else:
+        log = LOGGER
+    if payload:
+        headers['Content-Type'] = 'application/json'
+        data = json.dumps(payload).encode()
+    if insecure:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    req = request.Request(
+        url=url,
+        data=data,
+        headers=headers
+    )
+    try:
+        rsp = request.urlopen(req, timeout=5, cafile=cafile, context=ctx)
+    except Exception:
+        exc_type, exc_value = sys.exc_info()[:2]
+        exc_str = "Failed sending request to {url}: {exc_type}: {exc_val}".format(
+            url=url,
+            exc_type=exc_type.__name__,
+            exc_val=exc_value
+        )
+        log.error(exc_str)
+        return (False, exc_value)
+    data = rsp.read()
+    if rsp.code >= 200 and rsp.code <= 299:
+        return (True, data)
+    return (False, data)
+
+def github_api_request(path: str, api_base: str = 'https://api.github.com') -> tuple:
+    """
+    Make an HTTP request to the github_api
+
+    Args:
+        path:
+            The path (URI) on github's API where the request should be sent
+        api_base:
+            The base part of the URL where github's api can be found
+    Returns Tuple
+        Element 1: Bool: Indicating success
+        Element 2: Str: Response from the request to the api server
+    """
+    if path[0] != '/':
+        path = '/{}'.format(path)
+    status, data = http_request('{api_base}{path}'.format(path=path, api_base=api_base))
+    return (status, data.decode())
+
+def get_tags() -> list:
+    """
+    Query github api for all tags (releases)
+    """
+    LOGGER.info("Getting list of tags (releases)")
+    releases = []
+    api_res = github_api_request('/repos/hashicorp/vault/tags')
+    if not api_res[0]:
+        LOGGER.error("Could not query github for list of tags: {}".format(api_res[1]))
+        sys.exit(1)
+    else:
+        releases = json.loads(api_res[1])
+    return releases
+
+def download_docs(version: str) -> None:
+    """
+    Take a version string and grab the doc files from the github repo
+    """
+    docs = ('CHANGELOG.md', 'README.md', 'LICENSE')
+    mkdirs('./docs')
+    for doc in docs:
+        url = 'https://raw.githubusercontent.com/hashicorp/vault/v{version}/{doc}'.format(version=version, doc=doc)
+        LOGGER.info("Generated download link for doc: {doc} for version: {version}: {url}".format(doc=doc, version=version, url=url))
+        LOGGER.info("Downloading....")
+        status, data = http_request(url)
+        if status:
+            LOGGER.info("Downloading done. Status={status} size={size}".format(status=status, size=len(data)))
+            with open('./docs/{}'.format(doc), 'w') as dfile:
+                LOGGER.info("Saving file: {}".format(dfile.name))
+                dfile.write(data.decode())
+                dfile.flush()
+        else:
+            LOGGER.error("Failed to download doc: {}".format(doc))
+            LOGGER.error(data)
+            sys.exit(1)
+
+def generate_debian_changelog() -> str:
+    """
+    Generate a debian package formatted changelog
+    """
+    if not os.path.isfile('./docs/CHANGELOG.md'):
+        LOGGER.error("Could NOT find CHANGELOG at: ./docs/CHANGELOG.md")
+        sys.exit(1)
+    LOGGER.info("Generating changelog from downloaded changelog: ./docs/CHANGELOG.md")
+    changelog = []
+    chl_file = open('./docs/CHANGELOG.md', 'r')
+    cur_vers = None
+    vers_date = None
+    for chl_line in chl_file:
+        chl_line = chl_line.strip()
+        if not chl_line:
+            continue
+        if chl_line[0] == '#':
+            #Working on a new version, everything after this line is part of
+            #this new version
+            #This must be end of the changes for this version, so add changelog
+            #footer for the version
+            if cur_vers:
+                changelog.append('\n -- {author} <{email}>  {timestamp}\n'.format(author='Hashicorp', email='info@hashicorp.com', timestamp=vers_date))
+            #Strip out parens, and commas
+            chl_split = chl_line.split()
+            cur_vers = chl_split[1]
+            vers_date = ' '.join(chl_split[2:])
+            vers_date = vers_date.strip('(').split(')')[0] #We only want the bits in the first set of parens
+            vers_date = vers_date.replace('th,', ',').replace('st,', ',').replace('rd,', ',').replace('nd,', ',')
+            vers_date = datetime.datetime.strptime(vers_date, '%B %d, %Y').strftime('%a, %d %b %Y %H:%M:%S +0000')
+            changelog.append('vault ({version}) unstable; urgency=low\n'.format(version=cur_vers))
+            continue
+        if cur_vers:
+            changelog.append('  {}'.format(chl_line))
+    #All done, append last changlog footer
+    changelog.append('\n -- {author} <{email}>  {timestamp}\n'.format(author='Hashicorp', email='info@hashicorp.com', timestamp=vers_date))
+    return '\n'.join(changelog)
+
+def find_tag(tags: list, tag: str = 'latest', exclude: str = 'beta') -> str:
+    """
+    Go through the github api tags response and find the tag passed.
+
+    Returns the tag found
+    """
+    tags_list = []
+    val = None
+    if not tag:
+        tag = 'latest'
+    def human_keys(astr):
+        """
+        Sorts keys based on human order.. IE 1 is less than 10 etc..
+
+        alist.sort(key=human_keys) sorts in human order
+        """
+        keys = []
+        for elt in re.split(r'(\d+)', astr):
+            elt = elt.swapcase()
+            try:
+                elt = int(elt)
+            except ValueError:
+                pass
+            keys.append(elt)
+        return keys
+    if tag == 'latest':
+        #Generate a regular list of tags so they can be sorted
+        #First filter out any that are to be excluded
+        tags_list = list(filter(lambda tag_x: exclude not in tag_x['name'], tags))
+        #Create a list of the tag names
+        tags_list = map(lambda tag_x: tag_x['name'], tags_list)
+        #Human sort them
+        tags_list = sorted(tags_list, key=human_keys)
+        #Grab the last one
+        val = tags_list[-1]
+    else:
+        if tag[0] != 'v':
+            tag = 'v{}'.format(tag)
+        t_filter = list(filter(lambda tag_x: tag_x['name'] == tag, tags))
+        if t_filter:
+            val = tag
+    if val:
+        return val[1:]
+    return val
+
+def download_release(version: str) -> None:
+    """
+    Grab the latest release, download it, and extract it
+    """
+    if not version:
+        return
+    url = 'https://releases.hashicorp.com/vault/{version}/vault_{version}_linux_amd64.zip'.format(version=version)
+    LOGGER.info("Generated linux_amd64 download link for version: {version}: {url}".format(version=version, url=url))
+    LOGGER.info("Downloading....")
+    status, data = http_request(url)
+    if status:
+        LOGGER.info("Downloading done. Status={status} size={size}".format(status=status, size=len(data)))
+        LOGGER.info("Successfully downloaded zip file, attempting to extract 'vault'")
+        try:
+            _file = BytesIO(data)
+            zip_file = ZipFile(_file)
+            files = zip_file.namelist()
+            for fil in files:
+                LOGGER.info("Found file: '{}' in zip".format(fil))
+                if fil.lower() == 'vault':
+                    LOGGER.info("Extracting 'vault'")
+                    zip_file.extract(fil)
+                    break
+            if os.path.isfile('./vault'):
+                os.chmod('./vault', 0o755)
+            LOGGER.info("Successfully extracted 'vault' from zipfile")
+        except Exception:
+            exc_type, exc_value = sys.exc_info()[:2]
+            exc_str = "Failed extracting vault from the zipfile: {exc_type}: {exc_val}".format(
+                exc_type=exc_type.__name__,
+                exc_val=exc_value
+            )
+            LOGGER.error(exc_str)
+            sys.exit(1)
+    else:
+        LOGGER.error("Failed downloading zipfile")
+        LOGGER.error(data)
+        sys.exit(1)
+
+def mkdirs(path: str, mode: int = 0o755) -> bool:
+    """
+    This is like mkdir -p
+
+    Args:
+        path: str
+            Path to the ending directory desired to create
+        mode: int
+            Optional mode to set when creating the directories
+
+    Returns Bool of success or failure
+    """
+    if os.path.isdir(path):
+        return True
+    try:
+        os.makedirs(path, mode=mode)
+        return True
+    except FileExistsError as e:
+        if os.access(path, os.W_OK):
+            return True
+        LOGGER.warning("Path {}: exists but is unwritable".format(path))
+        return False
+    except OSError as e:
+        if e.errno == 17: #This is fileexists
+            return True
+        LOGGER.error("{}".format(os.strerror))
+        return False
+
+#-- Main --#
+VERSION = None
+if len(sys.argv) > 1:
+    VERSION = sys.argv[1]
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+LOGGER = logging.getLogger("Main")
+
+TAGS = get_tags()
+TAG = find_tag(TAGS, VERSION)
+if not TAG:
+    LOGGER.error("Could not find version: {}".format(VERSION))
+    sys.exit(1)
+download_release(TAG)
+download_docs(TAG)
+print(generate_debian_changelog())

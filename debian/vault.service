@@ -1,0 +1,12 @@
+[Unit]
+Description=Hashicorp Vault
+Documentation=https://github.com/hashicorp/vault
+
+[Service]
+Type=simple
+User=vault
+ExecStart=/usr/bin/vault server -config /etc/vault/vault.conf
+ExecReload=/bin/kill -HUP $MAINPID
+
+[Install]
+WantedBy=multi-user.target

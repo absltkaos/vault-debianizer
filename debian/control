@@ -1,0 +1,20 @@
+Source: vault
+Section: utils
+Priority: optional
+Maintainer: Dan Farnsworth <absltkaos@gmail.com>
+Homepage: http://www.vault.io
+Vcs-Git: https://github.com/hashicorp/vault.git
+Vcs-Browser: https://github.com/hashicorp/vault
+Standards-Version: 3.9.3
+Build-Depends: debhelper (>= 9), dh-systemd, python3
+
+Package: vault
+Architecture: any
+Suggests: consul, zookeeper, etcd
+Depends: ${misc:Depends}
+Description: Service for storing secrets
+ Vault secures, stores, and tightly controls access to tokens, passwords,
+ certificates, API keys, and other secrets in modern computing. Vault handles
+ leasing, key revocation, key rolling, and auditing. Vault presents a unified
+ API to access multiple backends: HSMs, AWS IAM, SQL databases, raw key/value,
+ and more.

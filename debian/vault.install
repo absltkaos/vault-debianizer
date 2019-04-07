@@ -1,0 +1,2 @@
+build/vault /usr/bin/
+vault.conf /usr/share/doc/vault/

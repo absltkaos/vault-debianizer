@@ -1,0 +1,42 @@
+#!/bin/sh
+
+USERNAME='vault'
+GROUP='vault'
+
+case "$1" in
+    configure)
+        addgroup --system $GROUP
+        adduser --system --gid `getent group $GROUP | cut -d: -f3` $USERNAME --home /var/lib/vault
+        chown $USERNAME:$GROUP /var/lib/vault
+        chmod 770 /var/lib/vault
+        setcap cap_ipc_lock=+ep /usr/bin/vault
+        if [ ! -f '/etc/vault/vault.conf' ] ; then
+            cp /usr/share/doc/vault/vault.conf /etc/vault/
+        fi
+    ;;
+    abort-upgrade|abort-remove|abort-deconfigure)
+
+    ;;
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+    ;;
+esac
+
+# This will only remove masks created by d-s-h on package removal.
+deb-systemd-helper unmask vault.service >/dev/null || true
+
+# was-enabled defaults to true, so new installations run enable.
+if deb-systemd-helper --quiet was-enabled vault.service; then
+        # Enables the unit on first installation, creates new
+        # symlinks on upgrades if the unit file has changed.
+        deb-systemd-helper enable vault.service >/dev/null || true
+else
+        # Update the statefile to add new symlinks (if any), which need to be
+        # cleaned up on purge. Also remove old symlinks.
+        deb-systemd-helper update-state vault.service >/dev/null || true
+fi
+if [ -d /run/systemd/system ]; then
+        systemctl --system daemon-reload >/dev/null || true
+        deb-systemd-invoke start vault.service >/dev/null || true
+fi
