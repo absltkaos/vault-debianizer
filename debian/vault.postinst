@@ -10,8 +10,13 @@ case "$1" in
         chown $USERNAME:$GROUP /var/lib/vault
         chmod 770 /var/lib/vault
         setcap cap_ipc_lock=+ep /usr/bin/vault
+        if [ ! -d '/etc/vault' ] ; then
+            mkdir /etc/vault
+            chmod 750 /etc/vault
+        fi
         if [ ! -f '/etc/vault/vault.conf' ] ; then
             cp /usr/share/doc/vault/vault.conf /etc/vault/
+            chown "$USERNAME" /etc/vault/vault.conf
         fi
     ;;
     abort-upgrade|abort-remove|abort-deconfigure)
