@@ -125,7 +125,7 @@ def download_docs(version: str) -> None:
             LOGGER.info("Downloading done. Status={status} size={size}".format(status=status, size=len(data)))
             with open('./docs/{}'.format(doc), 'w') as dfile:
                 LOGGER.info("Saving file: {}".format(dfile.name))
-                dfile.write(data.decode())
+                dfile.write(data.decode('ascii', 'ignore'))
                 dfile.flush()
         else:
             LOGGER.error("Failed to download doc: {}".format(doc))
