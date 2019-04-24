@@ -3,6 +3,7 @@
 ### vault-deb specific ###
 vault
 docs/
+builds/
 
 ### Python ###
 # Byte-compiled / optimized / DLL files
