@@ -13,7 +13,6 @@ import re
 import ssl
 import sys
 from io import BytesIO
-from textwrap import dedent
 from urllib import request
 from zipfile import ZipFile
 
@@ -195,7 +194,7 @@ def generate_debian_changelog(upto_vers=None) -> str:
                 vers_date = datetime.datetime.strptime(vers_date, '%B %d, %Y').strftime('%a, %d %b %Y %H:%M:%S +0000')
             except ValueError:
                 #Fall back to a timestamp of right now
-                vers_date = datetime.datetime.strftime(datetime.datetime.utcnow(),'%a, %d %b %Y %H:%M:%S +0000')
+                vers_date = datetime.datetime.strftime(datetime.datetime.utcnow(), '%a, %d %b %Y %H:%M:%S +0000')
             changelog_dict[cur_vers] = {
                 'version': cur_vers,
                 'changes': list()
