@@ -13,6 +13,7 @@ import re
 import ssl
 import sys
 from io import BytesIO
+from textwrap import dedent
 from urllib import request
 from zipfile import ZipFile
 
@@ -110,15 +111,19 @@ def get_tags() -> list:
         releases = json.loads(api_res[1])
     return releases
 
-def download_docs(version: str) -> None:
+def download_docs(version: str = None) -> None:
     """
     Take a version string and grab the doc files from the github repo
     """
     docs = ('CHANGELOG.md', 'README.md', 'LICENSE')
     mkdirs('./docs')
+    if version:
+        br_tag = 'v{}'.format(version)
+    else:
+        br_tag = 'master'
     for doc in docs:
-        url = 'https://raw.githubusercontent.com/hashicorp/vault/v{version}/{doc}'.format(version=version, doc=doc)
-        LOGGER.info("Generated download link for doc: {doc} for version: {version}: {url}".format(doc=doc, version=version, url=url))
+        url = 'https://raw.githubusercontent.com/hashicorp/vault/{br_tag}/{doc}'.format(br_tag=br_tag, doc=doc)
+        LOGGER.info("Generated download link for doc: {doc} for version: {br_tag}: {url}".format(doc=doc, br_tag=br_tag, url=url))
         LOGGER.info("Downloading....")
         status, data = http_request(url)
         if status:
@@ -132,7 +137,7 @@ def download_docs(version: str) -> None:
             LOGGER.error(data)
             sys.exit(1)
 
-def generate_debian_changelog() -> str:
+def generate_debian_changelog(upto_vers=None) -> str:
     """
     Generate a debian package formatted changelog
     """
@@ -140,10 +145,27 @@ def generate_debian_changelog() -> str:
         LOGGER.error("Could NOT find CHANGELOG at: ./docs/CHANGELOG.md")
         sys.exit(1)
     LOGGER.info("Generating changelog from downloaded changelog: ./docs/CHANGELOG.md")
+    def human_keys(astr):
+        """
+        Sorts keys based on human order.. IE 1 is less than 10 etc..
+
+        alist.sort(key=human_keys) sorts in human order
+        """
+        keys = []
+        for elt in re.split(r'(\d+)', astr):
+            elt = elt.swapcase()
+            try:
+                elt = int(elt)
+            except ValueError:
+                pass
+            keys.append(elt)
+        return keys
     changelog = []
+    changelog_dict = {}
     chl_file = open('./docs/CHANGELOG.md', 'r')
     cur_vers = None
     vers_date = None
+    #Parse the changelog into a dictionary
     for chl_line in chl_file:
         chl_line = chl_line.strip()
         if not chl_line:
@@ -154,20 +176,49 @@ def generate_debian_changelog() -> str:
             #This must be end of the changes for this version, so add changelog
             #footer for the version
             if cur_vers:
-                changelog.append('\n -- {author} <{email}>  {timestamp}\n'.format(author='Hashicorp', email='info@hashicorp.com', timestamp=vers_date))
+                changelog_dict[cur_vers]['author'] = 'Hashicorp'
+                changelog_dict[cur_vers]['email'] = 'info@hashicorp.com'
+                changelog_dict[cur_vers]['timestamp'] = vers_date
             #Strip out parens, and commas
             chl_split = chl_line.split()
             cur_vers = chl_split[1]
             vers_date = ' '.join(chl_split[2:])
             vers_date = vers_date.strip('(').split(')')[0] #We only want the bits in the first set of parens
+            #Parse out multi-day releases
+            vers_date = vers_date.split()
+            if len(vers_date) > 1:
+                if '/' in vers_date[1]:
+                    vers_date[1] = '{},'.format(vers_date[1].split('/')[0])
+            vers_date = ' '.join(vers_date)
             vers_date = vers_date.replace('th,', ',').replace('st,', ',').replace('rd,', ',').replace('nd,', ',')
-            vers_date = datetime.datetime.strptime(vers_date, '%B %d, %Y').strftime('%a, %d %b %Y %H:%M:%S +0000')
-            changelog.append('vault ({version}) unstable; urgency=low\n'.format(version=cur_vers))
+            try:
+                vers_date = datetime.datetime.strptime(vers_date, '%B %d, %Y').strftime('%a, %d %b %Y %H:%M:%S +0000')
+            except ValueError:
+                #Fall back to a timestamp of right now
+                vers_date = datetime.datetime.strftime(datetime.datetime.utcnow(),'%a, %d %b %Y %H:%M:%S +0000')
+            changelog_dict[cur_vers] = {
+                'version': cur_vers,
+                'changes': list()
+            }
             continue
         if cur_vers:
-            changelog.append('  {}'.format(chl_line))
-    #All done, append last changlog footer
-    changelog.append('\n -- {author} <{email}>  {timestamp}\n'.format(author='Hashicorp', email='info@hashicorp.com', timestamp=vers_date))
+            changelog_dict[cur_vers]['changes'].append('  {}'.format(chl_line))
+    #Add missing metadata for last entry
+    changelog_dict[cur_vers]['author'] = 'Hashicorp'
+    changelog_dict[cur_vers]['email'] = 'info@hashicorp.com'
+    changelog_dict[cur_vers]['timestamp'] = vers_date
+    #Get a list of the versions discovered
+    clog_versions = list(changelog_dict.keys())
+    clog_versions.sort(key=human_keys)
+    #clog_versions.reverse()
+    #Print the changelog
+    for vers in clog_versions:
+        changelog.append("\n -- {author} <{email}>  {timestamp}\n".format(**changelog_dict[vers]))
+        changelog.append('\n'.join(changelog_dict[vers]['changes']))
+        changelog.append("vault ({version}) unstable; urgency=low\n".format(**changelog_dict[vers]))
+        if vers == upto_vers:
+            break
+    changelog.reverse()
     return '\n'.join(changelog)
 
 def find_tag(tags: list, tag: str = 'latest', exclude: str = 'beta') -> str:
@@ -299,5 +350,5 @@ if not TAG:
     LOGGER.error("Could not find version: {}".format(VERSION))
     sys.exit(1)
 download_release(TAG)
-download_docs(TAG)
-print(generate_debian_changelog())
+download_docs()
+print(generate_debian_changelog(upto_vers=TAG))

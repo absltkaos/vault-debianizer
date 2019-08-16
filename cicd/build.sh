@@ -10,12 +10,14 @@ cd ${proj_root}
 #Clean up any possible old directories, and try to find and download the binary from HashiCorp
 rm -rf docs/
 rm -f vault
-./get_release $version > "${proj_root}/debian/changelog"
+cicd/get_release $version > "${proj_root}/debian/changelog"
 cp docs/LICENSE "${proj_root}/debian/copyright"
+
+mkdir -p builds
+cp "${proj_root}/debian/changelog" builds/
 
 #Build the package
 if dpkg-buildpackage -us -uc ; then
-    mkdir -p builds
     mv ../*.deb ../*.changes ../*.dsc ../*_*.tar.gz builds/
 else
     echo "Package building failed. :-("
