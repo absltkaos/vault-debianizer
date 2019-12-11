@@ -3,9 +3,10 @@ Description=Hashicorp Vault
 Documentation=https://github.com/hashicorp/vault
 
 [Service]
-Type=simple
+Type=forking
+PIDFile=/var/run/vault.pid
 User=vault
-ExecStart=/usr/bin/vault server -config /etc/vault/vault.conf
+ExecStart=/usr/bin/vault_server
 ExecReload=/bin/kill -HUP $MAINPID
 
 [Install]
