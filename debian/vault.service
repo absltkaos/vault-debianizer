@@ -4,7 +4,7 @@ Documentation=https://github.com/hashicorp/vault
 
 [Service]
 Type=forking
-PIDFile=/var/run/vault.pid
+PIDFile=/var/tmp/vault.pid
 User=vault
 ExecStart=/usr/bin/vault_server
 ExecReload=/bin/kill -HUP $MAINPID

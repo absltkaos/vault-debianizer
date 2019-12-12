@@ -25,5 +25,5 @@ echo "Executing command: GOMAXPROCS=${MAX_PROCS} /usr/bin/vault server -config '
 GOMAXPROCS=${MAX_PROCS} /usr/bin/vault server -config "$CONFIG_FILE" &
 PID=$!
 
-echo "Writing PID (${PID}) to /var/run/vault.pid"
-echo "$PID" > /var/run/vault.pid
+echo "Writing PID (${PID}) to /var/tmp/vault.pid"
+echo "$PID" > /var/tmp/vault.pid
