@@ -3,6 +3,14 @@
 USERNAME='vault'
 GROUP='vault'
 
+CONFIG_PATHS='
+/etc/vault/vault.conf
+/etc/vault/vault.json
+/etc/vault/config.conf
+/etc/vault/config.json 
+'
+CONFIG_PATH=''
+
 case "$1" in
     configure)
         addgroup --system $GROUP
@@ -14,7 +22,14 @@ case "$1" in
             mkdir /etc/vault
             chmod 750 /etc/vault
         fi
-        if [ ! -f '/etc/vault/vault.conf' ] ; then
+        for CPATH in $CONFIG_PATHS; do
+            if [ -f "$CPATH" ] ; then
+                CONFIG_PATH="${CPATH}"
+                break
+            fi
+        done
+        if [ -z "$CONFIG_PATH" ] ; then
+            echo "Copying new default config"
             cp /usr/share/doc/vault/vault.conf /etc/vault/
             chown "$USERNAME" /etc/vault/vault.conf
         fi
