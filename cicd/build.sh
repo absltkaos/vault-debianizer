@@ -24,6 +24,12 @@ else
     exit 1
 fi
 
+#Cleanup
+echo "Cleaning up from package build"
+debclean
+echo > debian/changelog
+echo -n > debian/copyright
+
 #List the files created from building the package
 echo "Files built (at ./builds):"
 if [ -d "builds/" ] ; then
