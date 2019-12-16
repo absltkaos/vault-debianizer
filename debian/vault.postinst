@@ -17,7 +17,11 @@ case "$1" in
         adduser --system --gid `getent group $GROUP | cut -d: -f3` $USERNAME --home /var/lib/vault
         chown $USERNAME:$GROUP /var/lib/vault
         chmod 770 /var/lib/vault
-        setcap cap_ipc_lock=+ep /usr/bin/vault
+        if which setcap > /dev/null 2>&1 ; then
+            setcap cap_ipc_lock=+ep /usr/bin/vault
+        else
+            echo "WARNING 'setcap' is NOT installed, make sure you disable mlock in your vault config"
+        fi
         if [ ! -d '/etc/vault' ] ; then
             mkdir /etc/vault
             chmod 750 /etc/vault
