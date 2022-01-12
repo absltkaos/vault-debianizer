@@ -89,10 +89,10 @@ max-args=12
 max-attributes=20
 
 # Maximum number of branch for function / method body
-max-branches=17
+max-branches=20
 
 #Maximum number of local variables for function / method
 max-locals=20
 
 # Maximum number of statements in function / method body
-max-statements=65
+max-statements=75
