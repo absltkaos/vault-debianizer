@@ -102,6 +102,10 @@ def github_api_request(path: str, api_base: str = 'https://api.github.com') -> t
         pass
     if 'link' in headers:
         def link_parse(links):
+            """
+            Take a 'link' header value returned from github api response and
+            parse it out. Returning a dict of 'rel' and link value
+            """
             links_split = links.split(',')
             link_dict = {}
             for link in links_split:
@@ -116,7 +120,7 @@ def github_api_request(path: str, api_base: str = 'https://api.github.com') -> t
         link_next = links['next']
         link_last = links['last']
         while link_next != link_last:
-            LOGGER.info('link_next="%s" link_last="%s"',link_next,link_last)
+            LOGGER.info('link_next="%s" link_last="%s"', link_next, link_last)
             status, new_data, headers = http_request(link_next)
             new_data = new_data.decode()
             new_data = json.loads(new_data)
@@ -156,6 +160,7 @@ def download_docs(version: str = None) -> None:
         LOGGER.info("Generated download link for doc: {doc} for version: {br_tag}: {url}".format(doc=doc, br_tag=br_tag, url=url))
         LOGGER.info("Downloading....")
         status, data, headers = http_request(url)
+        del headers
         if status:
             LOGGER.info("Downloading done. Status={status} size={size}".format(status=status, size=len(data)))
             with open('./docs/{}'.format(doc), 'w') as dfile:
@@ -229,7 +234,7 @@ def generate_debian_changelog(upto_vers=None) -> str:
                 next_line = chl_file.readline()
                 if next_line[0:3] == '###':
                     if 'unreleased' in next_line.lower():
-                        cur_vers=''
+                        cur_vers = ''
                         chl_line = chl_file.readline()
                         continue
                     vers_date = next_line[3:].strip()
@@ -327,6 +332,7 @@ def download_release(version: str) -> None:
     LOGGER.info("Generated linux_amd64 download link for version: {version}: {url}".format(version=version, url=url))
     LOGGER.info("Downloading....")
     status, data, headers = http_request(url)
+    del headers
     if status:
         LOGGER.info("Downloading done. Status={status} size={size}".format(status=status, size=len(data)))
         LOGGER.info("Successfully downloaded zip file, attempting to extract 'vault'")
