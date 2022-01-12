@@ -3,18 +3,58 @@
 USERNAME='vault'
 GROUP='vault'
 
+CONFIG_PATHS='
+/etc/vault/vault.conf
+/etc/vault/vault.json
+/etc/vault/config.conf
+/etc/vault/config.json 
+'
+CONFIG_PATH=''
+IN_CONTAINER="false"
+
+if ! cat /proc/1/sched | head -n 1 | grep -o '[0-9]\+' | head -n 1 | grep -q '^1$' ; then
+    IN_CONTAINER="true"
+fi
+
 case "$1" in
     configure)
-        addgroup --system $GROUP
-        adduser --system --gid `getent group $GROUP | cut -d: -f3` $USERNAME --home /var/lib/vault
-        chown $USERNAME:$GROUP /var/lib/vault
-        chmod 770 /var/lib/vault
-        setcap cap_ipc_lock=+ep /usr/bin/vault
+        if ! getent group "$GROUP" > /dev/null ; then
+            echo "Creating system group: $GROUP"
+            addgroup --system $GROUP
+        fi
+        if ! getent passwd "$USERNAME" > /dev/null ; then
+            echo "Creating system user: $USERNAME in $GROUP"
+            rmdir /var/lib/vault 2>/dev/null
+            adduser --system --gid `getent group $GROUP | cut -d: -f3` $USERNAME --home /var/lib/vault
+        fi
+        if [ -d '/var/lib/vault' ] ; then
+            chown $USERNAME:$GROUP /var/lib/vault
+            chmod 770 /var/lib/vault
+        fi
+        if which setcap > /dev/null 2>&1 ; then
+            setcap cap_ipc_lock=+ep /usr/bin/vault
+            if [ "$IN_CONTAINER" = "true" ] ; then
+                echo "Detected that we are in a container, checking to see if we have cap_ipc_lock available"
+                if ! /usr/bin/vault --help > /dev/null 2>&1 ; then
+                    echo "WARNING 'cap_ipc_lock is NOT available for use. Make sure you disable mlock in your vault config"
+                    setcap cap_ipc_lock=-ep /usr/bin/vault
+                fi
+            fi
+        else
+            echo "WARNING 'setcap' is NOT installed, make sure you disable mlock in your vault config"
+        fi
         if [ ! -d '/etc/vault' ] ; then
             mkdir /etc/vault
             chmod 750 /etc/vault
         fi
-        if [ ! -f '/etc/vault/vault.conf' ] ; then
+        for CPATH in $CONFIG_PATHS; do
+            if [ -f "$CPATH" ] ; then
+                CONFIG_PATH="${CPATH}"
+                break
+            fi
+        done
+        if [ -z "$CONFIG_PATH" ] ; then
+            echo "Copying new default config"
             cp /usr/share/doc/vault/vault.conf /etc/vault/
             chown "$USERNAME" /etc/vault/vault.conf
         fi

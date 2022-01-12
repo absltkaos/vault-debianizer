@@ -1,0 +1,29 @@
+#!/bin/bash
+
+CPU_COUNT=$(grep -c ^processor /proc/cpuinfo)
+MAX_PROCS=${GOMAXPROCS:-$CPU_COUNT}
+CONFIG_FILES=(
+    /etc/vault/vault.conf
+    /etc/vault/vault.json
+    /etc/vault/config.json
+    /etc/vault/config.conf
+)
+CONFIG_FILE=''
+for CFILE in "${CONFIG_FILES[@]}"; do
+    if [ -f "$CFILE" ] ; then
+        CONFIG_FILE="$CFILE"
+        break
+    fi
+done
+
+if [ -z "$CONFIG_FILE" ] ; then
+    echo "ERROR!! No config file found!"
+    exit 1
+fi
+
+echo "Executing command: GOMAXPROCS=${MAX_PROCS} /usr/bin/vault server -config '$CONFIG_FILE'"
+GOMAXPROCS=${MAX_PROCS} /usr/bin/vault server -config "$CONFIG_FILE" &
+PID=$!
+
+echo "Writing PID (${PID}) to /var/tmp/vault.pid"
+echo "$PID" > /var/tmp/vault.pid

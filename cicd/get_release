@@ -170,6 +170,8 @@ def generate_debian_changelog(upto_vers=None) -> str:
         if not chl_line:
             continue
         if chl_line[0] == '#':
+            if 'unreleased' in chl_line.lower():
+                continue
             #Working on a new version, everything after this line is part of
             #this new version
             #This must be end of the changes for this version, so add changelog
@@ -181,6 +183,10 @@ def generate_debian_changelog(upto_vers=None) -> str:
             #Strip out parens, and commas
             chl_split = chl_line.split()
             cur_vers = chl_split[1]
+            if '/' in cur_vers:
+                cur_vers = cur_vers.split('/')[1]
+            if len(cur_vers.split('.')) < 3:
+                cur_vers = '{}.0'.format(cur_vers)
             vers_date = ' '.join(chl_split[2:])
             vers_date = vers_date.strip('(').split(')')[0] #We only want the bits in the first set of parens
             #Parse out multi-day releases
