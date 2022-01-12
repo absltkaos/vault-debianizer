@@ -137,7 +137,7 @@ def get_tags() -> list:
     """
     LOGGER.info("Getting list of tags (releases)")
     releases = []
-    api_res = github_api_request('/repos/hashicorp/vault/tags')
+    api_res = github_api_request('/repos/hashicorp/vault/tags?per_page=100')
     if not api_res[0]:
         LOGGER.error("Could not query github for list of tags: {}".format(api_res[1]))
         sys.exit(1)
