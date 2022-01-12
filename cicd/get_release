@@ -72,11 +72,11 @@ def http_request(
             exc_val=exc_value
         )
         log.error(exc_str)
-        return (False, exc_value)
+        return (False, exc_value, {})
     data = rsp.read()
     if rsp.code >= 200 and rsp.code <= 299:
-        return (True, data)
-    return (False, data)
+        return (True, data, rsp.headers)
+    return (False, data, rsp.headers)
 
 def github_api_request(path: str, api_base: str = 'https://api.github.com') -> tuple:
     """
@@ -93,8 +93,39 @@ def github_api_request(path: str, api_base: str = 'https://api.github.com') -> t
     """
     if path[0] != '/':
         path = '/{}'.format(path)
-    status, data = http_request('{api_base}{path}'.format(path=path, api_base=api_base))
-    return (status, data.decode())
+    LOGGER.info("Sending request to github api: '%s%s'", api_base, path)
+    status, data, headers = http_request('{api_base}{path}'.format(path=path, api_base=api_base))
+    data = data.decode()
+    try:
+        data = json.loads(data)
+    except Exception:
+        pass
+    if 'link' in headers:
+        def link_parse(links):
+            links_split = links.split(',')
+            link_dict = {}
+            for link in links_split:
+                dst, rel = link.split(';')
+                dst = dst.strip().strip('<>')
+                rel = rel.split('=')[1].strip().strip('"')
+                link_dict[rel] = dst
+            return link_dict
+        #Got paginated results, loop through them
+        LOGGER.info("Got paginated results, looping through them")
+        links = link_parse(headers['link'])
+        link_next = links['next']
+        link_last = links['last']
+        while link_next != link_last:
+            LOGGER.info('link_next="%s" link_last="%s"',link_next,link_last)
+            status, new_data, headers = http_request(link_next)
+            new_data = new_data.decode()
+            new_data = json.loads(new_data)
+            try:
+                data.update(new_data)
+            except AttributeError:
+                data += new_data
+            link_next = link_parse(headers['link'])['next']
+    return (status, data)
 
 def get_tags() -> list:
     """
@@ -107,7 +138,7 @@ def get_tags() -> list:
         LOGGER.error("Could not query github for list of tags: {}".format(api_res[1]))
         sys.exit(1)
     else:
-        releases = json.loads(api_res[1])
+        releases = api_res[1]
     return releases
 
 def download_docs(version: str = None) -> None:
@@ -119,12 +150,12 @@ def download_docs(version: str = None) -> None:
     if version:
         br_tag = 'v{}'.format(version)
     else:
-        br_tag = 'master'
+        br_tag = 'main'
     for doc in docs:
         url = 'https://raw.githubusercontent.com/hashicorp/vault/{br_tag}/{doc}'.format(br_tag=br_tag, doc=doc)
         LOGGER.info("Generated download link for doc: {doc} for version: {br_tag}: {url}".format(doc=doc, br_tag=br_tag, url=url))
         LOGGER.info("Downloading....")
-        status, data = http_request(url)
+        status, data, headers = http_request(url)
         if status:
             LOGGER.info("Downloading done. Status={status} size={size}".format(status=status, size=len(data)))
             with open('./docs/{}'.format(doc), 'w') as dfile:
@@ -165,12 +196,15 @@ def generate_debian_changelog(upto_vers=None) -> str:
     cur_vers = None
     vers_date = None
     #Parse the changelog into a dictionary
-    for chl_line in chl_file:
+    chl_line = chl_file.readline()
+    while chl_line:
         chl_line = chl_line.strip()
         if not chl_line:
+            chl_line = chl_file.readline()
             continue
         if chl_line[0] == '#':
             if 'unreleased' in chl_line.lower():
+                chl_line = chl_file.readline()
                 continue
             #Working on a new version, everything after this line is part of
             #this new version
@@ -180,15 +214,25 @@ def generate_debian_changelog(upto_vers=None) -> str:
                 changelog_dict[cur_vers]['author'] = 'Hashicorp'
                 changelog_dict[cur_vers]['email'] = 'info@hashicorp.com'
                 changelog_dict[cur_vers]['timestamp'] = vers_date
-            #Strip out parens, and commas
             chl_split = chl_line.split()
             cur_vers = chl_split[1]
             if '/' in cur_vers:
                 cur_vers = cur_vers.split('/')[1]
             if len(cur_vers.split('.')) < 3:
                 cur_vers = '{}.0'.format(cur_vers)
-            vers_date = ' '.join(chl_split[2:])
-            vers_date = vers_date.strip('(').split(')')[0] #We only want the bits in the first set of parens
+            if '(' in chl_line:
+                #Strip out parens
+                vers_date = ' '.join(chl_split[2:])
+                vers_date = vers_date.strip('(').split(')')[0] #We only want the bits in the first set of parens
+            else:
+                # Check for newer style changelog format
+                next_line = chl_file.readline()
+                if next_line[0:3] == '###':
+                    if 'unreleased' in next_line.lower():
+                        cur_vers=''
+                        chl_line = chl_file.readline()
+                        continue
+                    vers_date = next_line[3:].strip()
             #Parse out multi-day releases
             vers_date = vers_date.split()
             if len(vers_date) > 1:
@@ -205,9 +249,11 @@ def generate_debian_changelog(upto_vers=None) -> str:
                 'version': cur_vers,
                 'changes': list()
             }
+            chl_line = chl_file.readline()
             continue
         if cur_vers:
             changelog_dict[cur_vers]['changes'].append('  {}'.format(chl_line))
+        chl_line = chl_file.readline()
     #Add missing metadata for last entry
     changelog_dict[cur_vers]['author'] = 'Hashicorp'
     changelog_dict[cur_vers]['email'] = 'info@hashicorp.com'
@@ -280,7 +326,7 @@ def download_release(version: str) -> None:
     url = 'https://releases.hashicorp.com/vault/{version}/vault_{version}_linux_amd64.zip'.format(version=version)
     LOGGER.info("Generated linux_amd64 download link for version: {version}: {url}".format(version=version, url=url))
     LOGGER.info("Downloading....")
-    status, data = http_request(url)
+    status, data, headers = http_request(url)
     if status:
         LOGGER.info("Downloading done. Status={status} size={size}".format(status=status, size=len(data)))
         LOGGER.info("Successfully downloaded zip file, attempting to extract 'vault'")
